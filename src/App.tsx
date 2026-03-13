@@ -10,14 +10,17 @@ import { Search, Shuffle, RotateCcw, BookOpen, GraduationCap, CheckCircle2, XCir
 import { motion, AnimatePresence } from "motion/react";
 import confetti from "canvas-confetti";
 
+import { supabase } from "./supabase";
+
 type Mode = "novels" | "dramas" | "quiz" | "profile" | "rankings";
 type QuizType = "novels" | "dramas";
 
 interface UserData {
-  id: number;
+  id: string;
   username: string;
   profile_photo?: string | null;
   about?: string | null;
+  email?: string;
 }
 
 interface UserStats {
@@ -28,7 +31,7 @@ interface UserStats {
 }
 
 interface UserScore {
-  id: number;
+  id: string;
   score: number;
   total: number;
   type: string;
@@ -57,28 +60,30 @@ const getCategoryColor = (cat: string) => {
   return map[cat] || "#a3a3a3";
 };
 
-// ── Local Storage Helpers ─────────────────────────────────────────────────────
-const STORAGE_KEYS = {
-  USER: "litmemory_user",
-  USERS: "litmemory_users",
-  SCORES: "litmemory_scores",
-  TOKEN: "litmemory_token"
+// ── Supabase Helpers ─────────────────────────────────────────────────────────
+const getSupabaseScores = async (userId: string): Promise<UserScore[]> => {
+  const { data, error } = await supabase
+    .from('scores')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+  
+  if (error) {
+    console.error('Error fetching scores:', error);
+    return [];
+  }
+  return data || [];
 };
 
-const getLocalUsers = (): any[] => JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || "[]");
-const saveLocalUsers = (users: any[]) => localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
-const getLocalScores = (userId: number): UserScore[] => {
-  const allScores = JSON.parse(localStorage.getItem(STORAGE_KEYS.SCORES) || "[]");
-  return allScores.filter((s: any) => s.user_id === userId);
-};
-const saveLocalScore = (score: any) => {
-  const allScores = JSON.parse(localStorage.getItem(STORAGE_KEYS.SCORES) || "[]");
-  allScores.push({ ...score, id: Date.now(), created_at: new Date().toISOString() });
-  localStorage.setItem(STORAGE_KEYS.SCORES, JSON.stringify(allScores));
+const saveSupabaseScore = async (score: any) => {
+  const { error } = await supabase
+    .from('scores')
+    .insert([score]);
+  
+  if (error) console.error('Error saving score:', error);
 };
 
-const calculateLocalStats = (userId: number): UserStats => {
-  const scores = getLocalScores(userId);
+const calculateStats = (scores: UserScore[]): UserStats => {
   if (scores.length === 0) return { total_quizzes: 0, avg_score: 0, high_score: 0, total_points: 0 };
   
   const total = scores.length;
@@ -94,13 +99,31 @@ const calculateLocalStats = (userId: number): UserStats => {
   };
 };
 
-const getLeaderboard = (): LeaderboardEntry[] => {
-  const users = getLocalUsers();
-  const leaderboard: LeaderboardEntry[] = users.map(user => {
-    const stats = calculateLocalStats(user.id);
+const fetchLeaderboardData = async (): Promise<LeaderboardEntry[]> => {
+  const { data: profiles, error: pError } = await supabase
+    .from('profiles')
+    .select('username, profile_photo, id');
+  
+  if (pError) {
+    console.error('Error fetching profiles:', pError);
+    return [];
+  }
+
+  const { data: scores, error: sError } = await supabase
+    .from('scores')
+    .select('user_id, score, total');
+  
+  if (sError) {
+    console.error('Error fetching scores for leaderboard:', sError);
+    return [];
+  }
+
+  const leaderboard: LeaderboardEntry[] = (profiles || []).map(profile => {
+    const userScores = (scores || []).filter(s => s.user_id === profile.id);
+    const stats = calculateStats(userScores as any);
     return {
-      username: user.username,
-      profile_photo: user.profile_photo,
+      username: profile.username,
+      profile_photo: profile.profile_photo,
       quiz_count: stats.total_quizzes,
       avg_score: Math.round(stats.avg_score),
       high_score: Math.round(stats.high_score),
@@ -264,14 +287,16 @@ export default function App() {
 
   // Auth state
   const [user, setUser] = useState<UserData | null>(null);
-  const [token, setToken] = useState<string | null>(localStorage.getItem(STORAGE_KEYS.TOKEN));
+  const [token, setToken] = useState<string | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [authError, setAuthError] = useState("");
   const [authView, setAuthView] = useState<"login" | "signup" | "forgot" | "reset">("login");
+  const [isVerificationPending, setIsVerificationPending] = useState(false);
   const [resetUsername, setResetUsername] = useState("");
   const [resetPhone, setResetPhone] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -289,6 +314,8 @@ export default function App() {
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [lastActiveMode, setLastActiveMode] = useState<Mode>("novels");
+
+  const isSupabaseConfigured = !!import.meta.env.VITE_SUPABASE_URL && !!import.meta.env.VITE_SUPABASE_ANON_KEY;
 
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -318,32 +345,74 @@ export default function App() {
   }, [search, shuffledItems, currentItems]);
 
   useEffect(() => {
-    const storedUser = localStorage.getItem(STORAGE_KEYS.USER);
-    if (storedUser && token) {
-      setUser(JSON.parse(storedUser));
-    }
-  }, [token]);
+    const checkUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+        
+        if (profile) {
+          setUser({
+            id: profile.id,
+            username: profile.username,
+            profile_photo: profile.profile_photo,
+            about: profile.about,
+            email: session.user.email
+          });
+          setToken(session.access_token);
+        }
+      }
+    };
+    checkUser();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+        
+        if (profile) {
+          setUser({
+            id: profile.id,
+            username: profile.username,
+            profile_photo: profile.profile_photo,
+            about: profile.about,
+            email: session.user.email
+          });
+          setToken(session.access_token);
+        }
+      } else if (event === 'SIGNED_OUT') {
+        setUser(null);
+        setToken(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const fetchUserStats = async () => {
     if (!user) return;
-    const stats = calculateLocalStats(user.id);
+    const scores = await getSupabaseScores(user.id);
+    const stats = calculateStats(scores);
     setUserStats(stats);
   };
 
   const fetchUserScores = async () => {
     if (!user) return;
-    const scores = getLocalScores(user.id);
+    const scores = await getSupabaseScores(user.id);
     setUserScores(scores);
   };
 
   const fetchLeaderboard = async () => {
     setIsLoadingLeaderboard(true);
-    // Simulate network delay
-    setTimeout(() => {
-      const lb = getLeaderboard();
-      setLeaderboard(lb);
-      setIsLoadingLeaderboard(false);
-    }, 500);
+    const lb = await fetchLeaderboardData();
+    setLeaderboard(lb);
+    setIsLoadingLeaderboard(false);
   };
 
   useEffect(() => {
@@ -360,92 +429,82 @@ export default function App() {
     e.preventDefault();
     setAuthError("");
     
-    const users = getLocalUsers();
-    
     if (authMode === "signup") {
-      if (users.find(u => u.username === username)) {
-        setAuthError("Username already exists");
+      const { data, error } = await supabase.auth.signUp({
+        email: email,
+        password: password,
+        options: {
+          data: {
+            username: username,
+            phone_number: phoneNumber
+          }
+        }
+      });
+
+      if (error) {
+        setAuthError(error.message);
         return;
       }
-      if (users.find(u => u.phone_number === phoneNumber)) {
-        setAuthError("Phone number already registered");
-        return;
+
+      if (data.user) {
+        // Create profile
+        const { error: pError } = await supabase
+          .from('profiles')
+          .insert([{ 
+            id: data.user.id, 
+            username: username,
+            about: null,
+            profile_photo: null
+          }]);
+        
+        if (pError) {
+          console.error('Error creating profile:', pError);
+        }
+        
+        if (!data.session) {
+          setIsVerificationPending(true);
+        } else {
+          setShowAuthModal(false);
+        }
       }
-      
-      const newUser = {
-        id: Date.now(),
-        username,
-        password, // In a real app, hash this!
-        phone_number: phoneNumber,
-        profile_photo: null,
-        about: null
-      };
-      
-      users.push(newUser);
-      saveLocalUsers(users);
-      
-      const dummyToken = "local-token-" + newUser.id;
-      localStorage.setItem(STORAGE_KEYS.TOKEN, dummyToken);
-      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(newUser));
-      setToken(dummyToken);
-      setUser(newUser);
-      setShowAuthModal(false);
     } else {
-      const foundUser = users.find(u => (u.username === username || u.phone_number === username) && u.password === password);
-      if (!foundUser) {
-        setAuthError("Invalid username or password");
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: password
+      });
+
+      if (error) {
+        if (error.message.includes("Email not confirmed")) {
+          setIsVerificationPending(true);
+        } else {
+          setAuthError(error.message);
+        }
         return;
       }
-      
-      const dummyToken = "local-token-" + foundUser.id;
-      localStorage.setItem(STORAGE_KEYS.TOKEN, dummyToken);
-      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(foundUser));
-      setToken(dummyToken);
-      setUser(foundUser);
-      setShowAuthModal(false);
+
+      if (data.user) {
+        setShowAuthModal(false);
+      }
     }
-    
-    setUsername("");
-    setPassword("");
-    setPhoneNumber("");
   };
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError("");
-    const users = getLocalUsers();
-    const found = users.find(u => u.username === resetUsername && u.phone_number === resetPhone);
-    if (!found) {
-      setAuthError("No user found with that username and phone number combination");
-    } else {
-      setAuthView("reset");
-    }
+    // Supabase reset password logic would go here
+    setAuthError("Password reset is currently handled via Supabase dashboard or email.");
   };
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError("");
-    const users = getLocalUsers();
-    const idx = users.findIndex(u => u.username === resetUsername && u.phone_number === resetPhone);
-    if (idx === -1) {
-      setAuthError("Identity verification failed");
-    } else {
-      users[idx].password = newPassword;
-      saveLocalUsers(users);
-      alert("Password reset successfully! You can now login.");
-      setAuthView("login");
-      setAuthMode("login");
-      setResetUsername("");
-      setResetPhone("");
-      setNewPassword("");
-    }
+    // Supabase reset password logic would go here
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem(STORAGE_KEYS.TOKEN);
-    localStorage.removeItem(STORAGE_KEYS.USER);
-    setToken(null);
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     setUser(null);
+    setToken(null);
     setMode("novels");
   };
 
@@ -454,41 +513,27 @@ export default function App() {
     if (!user) return;
     setIsUpdatingProfile(true);
     
-    // Simulate delay
-    setTimeout(() => {
-      const users = getLocalUsers();
-      const idx = users.findIndex(u => u.id === user.id);
-      
-      if (idx === -1) {
-        handleLogout();
-        setIsUpdatingProfile(false);
-        return;
-      }
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        username: editUsername || user.username,
+        profile_photo: editPhoto !== null ? editPhoto : user.profile_photo,
+        about: editAbout !== undefined ? editAbout : user.about
+      })
+      .eq('id', user.id);
 
-      // Check username uniqueness if changed
-      if (editUsername && editUsername !== user.username) {
-        if (users.find(u => u.username === editUsername && u.id !== user.id)) {
-          alert("Username already taken");
-          setIsUpdatingProfile(false);
-          return;
-        }
-      }
-
-      const updatedUser = {
-        ...users[idx],
-        username: editUsername || users[idx].username,
-        profile_photo: editPhoto !== null ? editPhoto : users[idx].profile_photo,
-        about: editAbout !== undefined ? editAbout : users[idx].about
-      };
-
-      users[idx] = updatedUser;
-      saveLocalUsers(users);
-      
-      setUser(updatedUser);
-      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(updatedUser));
+    if (error) {
+      alert(error.message);
+    } else {
+      setUser({
+        ...user,
+        username: editUsername || user.username,
+        profile_photo: editPhoto !== null ? editPhoto : user.profile_photo,
+        about: editAbout !== undefined ? editAbout : user.about
+      });
       setIsEditingProfile(false);
-      setIsUpdatingProfile(false);
-    }, 800);
+    }
+    setIsUpdatingProfile(false);
   };
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -573,11 +618,12 @@ export default function App() {
       
       // Save score if logged in
       if (user) {
-        saveLocalScore({
+        saveSupabaseScore({
           user_id: user.id,
           score,
           total: shuffledItems.length,
-          type: quizType
+          type: quizType,
+          created_at: new Date().toISOString()
         });
       }
 
@@ -602,6 +648,36 @@ export default function App() {
       }
     }
   };
+
+  if (!isSupabaseConfigured) {
+    return (
+      <div className="min-h-screen bg-black text-zinc-100 flex items-center justify-center p-6">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="max-w-md w-full bg-zinc-900 border border-zinc-800 rounded-3xl p-8 text-center shadow-2xl"
+        >
+          <div className="w-20 h-20 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-6">
+            <Info size={40} className="text-amber-500" />
+          </div>
+          <h1 className="text-2xl font-bold mb-4">Supabase Setup Required</h1>
+          <p className="text-zinc-400 mb-8 leading-relaxed">
+            To enable the backend features (Authentication & Leaderboard), please add your Supabase credentials to the environment variables in the <strong>Settings</strong> menu.
+          </p>
+          <div className="space-y-4 text-left bg-black/50 p-4 rounded-2xl border border-zinc-800 mb-8">
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">Required Variables</span>
+              <code className="text-xs text-indigo-400">VITE_SUPABASE_URL</code>
+              <code className="text-xs text-indigo-400">VITE_SUPABASE_ANON_KEY</code>
+            </div>
+          </div>
+          <p className="text-xs text-zinc-500 italic">
+            Once added, the application will automatically refresh and connect.
+          </p>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#09090b] text-zinc-100 font-sans selection:bg-indigo-500/30">
@@ -1315,17 +1391,52 @@ export default function App() {
                   </p>
                 </div>
 
-                {authView === "login" || authView === "signup" ? (
+                {isVerificationPending ? (
+                  <div className="text-center py-8">
+                    <div className="w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+                      <CheckCircle2 size={40} className="text-emerald-500" />
+                    </div>
+                    <h3 className="text-xl font-bold text-zinc-50 mb-2">Check your email</h3>
+                    <p className="text-zinc-400 text-sm mb-8">
+                      We've sent a verification link to <span className="text-indigo-400 font-bold">{email}</span>. 
+                      Please verify your email to continue.
+                    </p>
+                    <button 
+                      onClick={() => {
+                        setIsVerificationPending(false);
+                        setAuthView("login");
+                        setAuthMode("login");
+                        setAuthError("");
+                      }}
+                      className="w-full py-4 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl font-bold transition-all"
+                    >
+                      Back to Login
+                    </button>
+                  </div>
+                ) : authView === "login" || authView === "signup" ? (
                   <form onSubmit={handleAuth} className="space-y-4">
+                    {authView === "signup" && (
+                      <div>
+                        <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">Username</label>
+                        <input 
+                          type="text" 
+                          required
+                          value={username}
+                          onChange={(e) => setUsername(e.target.value)}
+                          className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all text-zinc-100"
+                          placeholder="Choose a username"
+                        />
+                      </div>
+                    )}
                     <div>
-                      <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">Username or Phone</label>
+                      <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">Email Address</label>
                       <input 
-                        type="text" 
+                        type="email" 
                         required
-                        value={username}
-                        onChange={(e) => setUsername(e.target.value)}
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
                         className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all text-zinc-100"
-                        placeholder="Enter your username or phone"
+                        placeholder="Enter your email"
                       />
                     </div>
                     {authView === "signup" && (
