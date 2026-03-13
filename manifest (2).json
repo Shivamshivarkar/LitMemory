@@ -1,0 +1,21 @@
+{
+  "background_color": "#ffffff",
+  "dir": "ltr",
+  "display": "fullscreen",
+  "name": "LitMemory",
+  "orientation": "any",
+  "scope": "/",
+  "short_name": "litmemory.vercel",
+  "start_url": "https://litmemory.vercel.app/",
+  "theme_color": "#4f39f6",
+  "lang": "en",
+  "id": "Shivam",
+  "description": "Memory Trainer",
+  "display_override": [
+    "fullscreen",
+    "standalone",
+    "window-controls-overlay",
+    "minimal-ui",
+    "browser"
+  ]
+}
