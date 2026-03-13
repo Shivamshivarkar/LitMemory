@@ -24,6 +24,7 @@ interface UserStats {
   total_quizzes: number;
   avg_score: number;
   high_score: number;
+  total_points: number;
 }
 
 interface UserScore {
@@ -36,7 +37,8 @@ interface UserScore {
 
 interface LeaderboardEntry {
   username: string;
-  total_quizzes: number;
+  profile_photo?: string | null;
+  quiz_count: number;
   avg_score: number;
   high_score: number;
   total_points: number;
@@ -77,48 +79,36 @@ const saveLocalScore = (score: any) => {
 
 const calculateLocalStats = (userId: number): UserStats => {
   const scores = getLocalScores(userId);
-  if (scores.length === 0) return { total_quizzes: 0, avg_score: 0, high_score: 0 };
+  if (scores.length === 0) return { total_quizzes: 0, avg_score: 0, high_score: 0, total_points: 0 };
   
   const total = scores.length;
-  const sum = scores.reduce((acc, s) => acc + (s.score * 100 / s.total), 0);
+  const sumPercentage = scores.reduce((acc, s) => acc + (s.score * 100 / s.total), 0);
   const high = Math.max(...scores.map(s => (s.score * 100 / s.total)));
+  const totalPoints = scores.reduce((acc, s) => acc + s.score, 0);
   
   return {
     total_quizzes: total,
-    avg_score: sum / total,
-    high_score: high
+    avg_score: sumPercentage / total,
+    high_score: high,
+    total_points: totalPoints
   };
 };
 
-const getMockLeaderboard = (currentUser: UserData | null): LeaderboardEntry[] => {
-  const mockUsers = [
-    { username: "LiteratureLover", total_quizzes: 45, avg_score: 92, high_score: 100, total_points: 450 },
-    { username: "BookWorm99", total_quizzes: 38, avg_score: 88, high_score: 100, total_points: 380 },
-    { username: "DramaQueen", total_quizzes: 30, avg_score: 85, high_score: 90, total_points: 300 },
-    { username: "ShakespeareFan", total_quizzes: 25, avg_score: 82, high_score: 90, total_points: 250 },
-  ];
-
-  if (currentUser) {
-    const stats = calculateLocalStats(currentUser.id);
-    const userEntry = {
-      username: currentUser.username,
-      total_quizzes: stats.total_quizzes,
+const getLeaderboard = (): LeaderboardEntry[] => {
+  const users = getLocalUsers();
+  const leaderboard: LeaderboardEntry[] = users.map(user => {
+    const stats = calculateLocalStats(user.id);
+    return {
+      username: user.username,
+      profile_photo: user.profile_photo,
+      quiz_count: stats.total_quizzes,
       avg_score: Math.round(stats.avg_score),
       high_score: Math.round(stats.high_score),
-      total_points: stats.total_quizzes * 10 // Simple points logic
+      total_points: stats.total_points
     };
-    
-    // Add current user if not already there (by username)
-    if (!mockUsers.find(u => u.username === userEntry.username)) {
-      mockUsers.push(userEntry);
-    } else {
-      // Update existing
-      const idx = mockUsers.findIndex(u => u.username === userEntry.username);
-      mockUsers[idx] = userEntry;
-    }
-  }
+  });
 
-  return mockUsers.sort((a, b) => b.total_points - a.total_points || b.avg_score - a.avg_score);
+  return leaderboard.sort((a, b) => b.total_points - a.total_points || b.avg_score - a.avg_score);
 };
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -350,7 +340,7 @@ export default function App() {
     setIsLoadingLeaderboard(true);
     // Simulate network delay
     setTimeout(() => {
-      const lb = getMockLeaderboard(user);
+      const lb = getLeaderboard();
       setLeaderboard(lb);
       setIsLoadingLeaderboard(false);
     }, 500);
@@ -1184,6 +1174,37 @@ export default function App() {
                         {quizIndex < shuffledItems.length - 1 ? "Next Question" : "See Results"}
                         <ArrowRight className="group-hover:translate-x-1 transition-transform" />
                       </button>
+
+                      {/* Additional Info Section */}
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.2 }}
+                        className="mt-8 p-6 bg-zinc-950/50 border border-zinc-800 rounded-2xl space-y-4"
+                      >
+                        <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                          <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Literary Context</h4>
+                          {shuffledItems[quizIndex].year && (
+                            <span className="text-xs font-bold text-indigo-400 bg-indigo-400/10 px-3 py-1 rounded-full">
+                              {shuffledItems[quizIndex].year}
+                            </span>
+                          )}
+                        </div>
+                        
+                        {shuffledItems[quizIndex].summary && (
+                          <div>
+                            <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-1">Summary</p>
+                            <p className="text-zinc-300 text-sm italic leading-relaxed">"{shuffledItems[quizIndex].summary}"</p>
+                          </div>
+                        )}
+                        
+                        {shuffledItems[quizIndex].facts && (
+                          <div className="pt-2">
+                            <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-1">Key Fact</p>
+                            <p className="text-zinc-400 text-sm leading-relaxed">{shuffledItems[quizIndex].facts}</p>
+                          </div>
+                        )}
+                      </motion.div>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -1209,6 +1230,12 @@ export default function App() {
                       <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1">Total</p>
                       <p className="text-2xl font-bold text-zinc-100">{shuffledItems.length}</p>
                     </div>
+                  </div>
+
+                  <div className="mb-6">
+                    <p className={`text-xl font-bold ${score >= 5 ? "text-emerald-400" : "text-amber-400"}`}>
+                      {score >= 5 ? "Shinchan: Sugoi! Great job! 🎉" : "Shinchan: Haha! Study more! 😜"}
+                    </p>
                   </div>
 
                   <div className="mb-10 rounded-2xl overflow-hidden max-w-xs mx-auto shadow-2xl border-4 border-zinc-800">
