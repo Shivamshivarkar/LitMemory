@@ -7,15 +7,16 @@ import React, { useState, useMemo, useEffect, useRef, MouseEvent } from "react";
 import { novels, Novel } from "./data";
 import { dramas, Drama } from "./dramaData";
 import { proseDatabase, Prose } from "./prosedata";
-import { Search, Shuffle, RotateCcw, BookOpen, GraduationCap, CheckCircle2, XCircle, Info, Trophy, ArrowRight, Theater, X, Menu, Layout, History, Download } from "lucide-react";
+import { poemData, Poem } from "./poemdata";
+import { Search, Shuffle, RotateCcw, BookOpen, GraduationCap, CheckCircle2, XCircle, Info, Trophy, ArrowRight, Theater, X, Menu, Layout, History, Download, List, Feather } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import confetti from "canvas-confetti";
 
-type Mode = "novels" | "dramas" | "prose" | "quiz";
-type QuizType = "novels" | "dramas" | "prose" | "all";
+type Mode = "novels" | "dramas" | "prose" | "poems" | "quiz";
+type QuizType = "novels" | "dramas" | "prose" | "poems" | "all";
 
 interface QuizHistoryItem {
-  item: Novel | Drama | Prose;
+  item: Novel | Drama | Prose | Poem;
   selectedAnswer: string;
   isCorrect: boolean;
 }
@@ -137,9 +138,13 @@ function FlashCard({ item, index, isFlipped, onFlip, onInfo }: FlashCardProps) {
   );
 }
 
-function DetailModal({ item, onClose, mode }: { item: Novel | Drama | Prose | null, onClose: () => void, mode: string }) {
+function DetailModal({ item, onClose, mode }: { item: Novel | Drama | Prose | Poem | null, onClose: () => void, mode: string }) {
   if (!item) return null;
   const color = getCategoryColor(item.category);
+  
+  // Helper to check if it's a Poem
+  const isPoem = 'poet' in item || 'form' in item;
+  
   return (
     <div
       onClick={onClose}
@@ -159,22 +164,34 @@ function DetailModal({ item, onClose, mode }: { item: Novel | Drama | Prose | nu
           <X size={20} />
         </button>
         <span className="text-[10px] font-black uppercase tracking-widest" style={{ color }}>
-          {item.category} {item.category.toLowerCase().includes(mode === "novels" ? "novel" : mode === "dramas" ? "drama" : "prose") ? "" : mode === "novels" ? "Novel" : mode === "dramas" ? "Drama" : "Prose"}
+          {item.category} {item.category.toLowerCase().includes(mode === "novels" ? "novel" : mode === "dramas" ? "drama" : mode === "poems" ? "poem" : "prose") ? "" : mode === "novels" ? "Novel" : mode === "dramas" ? "Drama" : mode === "poems" ? "Poem" : "Prose"}
         </span>
         <h2 className="text-3xl font-bold text-zinc-50 mt-2 mb-1 font-serif">{item.title}</h2>
         <p className="text-zinc-400 text-lg mb-8">by {item.author} {item.year ? `· ${item.year}` : ""}</p>
 
         <div className="space-y-6">
+          {isPoem && (item as Poem).poet && (
+            <div className="bg-zinc-950/30 border border-zinc-800/50 rounded-xl p-4">
+              <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1">Poet Context</div>
+              <p className="text-zinc-300 text-sm">{(item as Poem).poet}</p>
+            </div>
+          )}
+          {isPoem && (item as Poem).form && (
+            <div className="bg-zinc-950/30 border border-zinc-800/50 rounded-xl p-4">
+              <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1">Poetic Form</div>
+              <p className="text-zinc-300 text-sm">{(item as Poem).form}</p>
+            </div>
+          )}
           {item.summary && (
             <div className="bg-zinc-950/50 border border-zinc-800 rounded-2xl p-6">
-              <div className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-3">The Story</div>
+              <div className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-3">The Story / Essence</div>
               <p className="text-zinc-300 text-sm leading-relaxed italic">"{item.summary}"</p>
             </div>
           )}
           {item.facts && (
             <div className="rounded-2xl p-6 border border-zinc-800" style={{ background: color + "08", borderColor: color + "22" }}>
               <div className="text-[10px] font-bold uppercase tracking-widest mb-3" style={{ color }}>Literary Fact</div>
-              <p className="text-zinc-300 text-sm leading-relaxed">{item.facts}</p>
+              <p className="text-zinc-300 text-sm leading-relaxed whitespace-pre-line">{item.facts}</p>
             </div>
           )}
         </div>
@@ -184,11 +201,12 @@ function DetailModal({ item, onClose, mode }: { item: Novel | Drama | Prose | nu
 }
 
 export default function App() {
-  const [mode, setMode] = useState<Mode>("prose");
+  const [mode, setMode] = useState<Mode>("poems");
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [shuffledItems, setShuffledItems] = useState<(Novel | Drama | Prose)[]>([]);
+  const [shuffledItems, setShuffledItems] = useState<(Novel | Drama | Prose | Poem)[]>([]);
   const [flippedIndex, setFlippedIndex] = useState<number | null>(null);
+  const [isListView, setIsListView] = useState(false);
   
   // Quiz state
   const [quizType, setQuizType] = useState<QuizType | null>(null);
@@ -200,13 +218,14 @@ export default function App() {
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
   const [quizHistory, setQuizHistory] = useState<QuizHistoryItem[]>([]);
 
-  const [selectedItem, setSelectedItem] = useState<Novel | Drama | Prose | null>(null);
+  const [selectedItem, setSelectedItem] = useState<Novel | Drama | Prose | Poem | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [lastActiveMode, setLastActiveMode] = useState<Mode>("prose");
+  const [lastActiveMode, setLastActiveMode] = useState<Mode>("poems");
 
   const currentItems = useMemo(() => {
     if (mode === "novels") return novels;
     if (mode === "dramas") return dramas;
+    if (mode === "poems") return poemData;
     return proseDatabase;
   }, [mode]);
   const categories = useMemo(() => Array.from(new Set(currentItems.map(n => n.category))), [currentItems]);
@@ -250,7 +269,7 @@ export default function App() {
 
   // Quiz Logic
   const startQuiz = (type: QuizType) => {
-    let sourceItems: (Novel | Drama | Prose)[] = [];
+    let sourceItems: (Novel | Drama | Prose | Poem)[] = [];
     let quizCount = 10;
 
     if (type === "novels") {
@@ -259,8 +278,10 @@ export default function App() {
       sourceItems = dramas;
     } else if (type === "prose") {
       sourceItems = proseDatabase;
+    } else if (type === "poems") {
+      sourceItems = poemData;
     } else if (type === "all") {
-      sourceItems = [...novels, ...dramas, ...proseDatabase];
+      sourceItems = [...novels, ...dramas, ...proseDatabase, ...poemData];
       quizCount = 20;
     }
 
@@ -275,7 +296,7 @@ export default function App() {
     generateOptions(quizSet[0], sourceItems);
   };
 
-  const generateOptions = (currentItem: Novel | Drama | Prose, sourceItems: (Novel | Drama | Prose)[]) => {
+  const generateOptions = (currentItem: Novel | Drama | Prose | Poem, sourceItems: (Novel | Drama | Prose | Poem)[]) => {
     const others = sourceItems
       .filter(n => n.author !== currentItem.author)
       .map(n => n.author);
@@ -310,11 +331,12 @@ export default function App() {
     if (quizIndex < shuffledItems.length - 1) {
       const nextIdx = quizIndex + 1;
       setQuizIndex(nextIdx);
-      let sourceItems: (Novel | Drama | Prose)[] = [];
+      let sourceItems: (Novel | Drama | Prose | Poem)[] = [];
       if (quizType === "novels") sourceItems = novels;
       else if (quizType === "dramas") sourceItems = dramas;
       else if (quizType === "prose") sourceItems = proseDatabase;
-      else sourceItems = [...novels, ...dramas, ...proseDatabase];
+      else if (quizType === "poems") sourceItems = poemData;
+      else sourceItems = [...novels, ...dramas, ...proseDatabase, ...poemData];
       
       generateOptions(shuffledItems[nextIdx], sourceItems);
     } else {
@@ -364,25 +386,31 @@ export default function App() {
 
           <nav className="hidden md:flex items-center bg-zinc-900/50 border border-zinc-800 rounded-2xl p-1">
             <button 
-              onClick={() => { setMode("prose"); setSelectedCategory(null); setSearch(""); setLastActiveMode("prose"); }}
-              className={`px-5 py-2 rounded-xl text-sm font-medium transition-all ${mode === "prose" ? "bg-zinc-800 text-zinc-50 shadow-sm" : "text-zinc-400 hover:text-zinc-200"}`}
+              onClick={() => { setMode("poems"); setSelectedCategory(null); setSearch(""); setLastActiveMode("poems"); setIsListView(false); }}
+              className={`px-5 py-2 rounded-xl text-sm font-medium transition-all ${mode === "poems" ? "bg-zinc-800 text-zinc-50 shadow-sm" : "text-zinc-400 hover:text-zinc-200"}`}
             >
-              Prose
+              Poetry
             </button>
             <button 
-              onClick={() => { setMode("novels"); setSelectedCategory(null); setSearch(""); setLastActiveMode("novels"); }}
-              className={`px-5 py-2 rounded-xl text-sm font-medium transition-all ${mode === "novels" ? "bg-zinc-800 text-zinc-50 shadow-sm" : "text-zinc-400 hover:text-zinc-200"}`}
-            >
-              Novels
-            </button>
-            <button 
-              onClick={() => { setMode("dramas"); setSelectedCategory(null); setSearch(""); setLastActiveMode("dramas"); }}
+              onClick={() => { setMode("dramas"); setSelectedCategory(null); setSearch(""); setLastActiveMode("dramas"); setIsListView(false); }}
               className={`px-5 py-2 rounded-xl text-sm font-medium transition-all ${mode === "dramas" ? "bg-zinc-800 text-zinc-50 shadow-sm" : "text-zinc-400 hover:text-zinc-200"}`}
             >
               Dramas
             </button>
             <button 
-              onClick={() => { setMode("quiz"); setQuizType(null); setQuizFinished(false); setLastActiveMode("quiz"); }}
+              onClick={() => { setMode("novels"); setSelectedCategory(null); setSearch(""); setLastActiveMode("novels"); setIsListView(false); }}
+              className={`px-5 py-2 rounded-xl text-sm font-medium transition-all ${mode === "novels" ? "bg-zinc-800 text-zinc-50 shadow-sm" : "text-zinc-400 hover:text-zinc-200"}`}
+            >
+              Novels
+            </button>
+            <button 
+              onClick={() => { setMode("prose"); setSelectedCategory(null); setSearch(""); setLastActiveMode("prose"); setIsListView(false); }}
+              className={`px-5 py-2 rounded-xl text-sm font-medium transition-all ${mode === "prose" ? "bg-zinc-800 text-zinc-50 shadow-sm" : "text-zinc-400 hover:text-zinc-200"}`}
+            >
+              Prose
+            </button>
+            <button 
+              onClick={() => { setMode("quiz"); setQuizType(null); setQuizFinished(false); setLastActiveMode("quiz"); setIsListView(false); }}
               className={`px-5 py-2 rounded-xl text-sm font-medium transition-all ${mode === "quiz" ? "bg-zinc-800 text-zinc-50 shadow-sm" : "text-zinc-400 hover:text-zinc-200"}`}
             >
               Quiz
@@ -444,28 +472,35 @@ export default function App() {
 
               <div className="space-y-2 flex-1">
                 <button 
-                  onClick={() => { setMode("prose"); setSelectedCategory(null); setSearch(""); setLastActiveMode("prose"); setIsMobileMenuOpen(false); }}
-                  className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl font-medium transition-all ${mode === "prose" ? "bg-indigo-600/10 text-indigo-400 border border-indigo-500/30" : "text-zinc-400 hover:bg-zinc-900 border border-transparent"}`}
+                  onClick={() => { setMode("poems"); setSelectedCategory(null); setSearch(""); setLastActiveMode("poems"); setIsMobileMenuOpen(false); setIsListView(false); }}
+                  className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl font-medium transition-all ${mode === "poems" ? "bg-indigo-600/10 text-indigo-400 border border-indigo-500/30" : "text-zinc-400 hover:bg-zinc-900 border border-transparent"}`}
                 >
-                  <Layout size={20} />
-                  Prose
+                  <Feather size={20} />
+                  Poetry
                 </button>
                 <button 
-                  onClick={() => { setMode("novels"); setSelectedCategory(null); setSearch(""); setLastActiveMode("novels"); setIsMobileMenuOpen(false); }}
-                  className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl font-medium transition-all ${mode === "novels" ? "bg-indigo-600/10 text-indigo-400 border border-indigo-500/30" : "text-zinc-400 hover:bg-zinc-900 border border-transparent"}`}
-                >
-                  <BookOpen size={20} />
-                  Novels
-                </button>
-                <button 
-                  onClick={() => { setMode("dramas"); setSelectedCategory(null); setSearch(""); setLastActiveMode("dramas"); setIsMobileMenuOpen(false); }}
+                  onClick={() => { setMode("dramas"); setSelectedCategory(null); setSearch(""); setLastActiveMode("dramas"); setIsMobileMenuOpen(false); setIsListView(false); }}
                   className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl font-medium transition-all ${mode === "dramas" ? "bg-indigo-600/10 text-indigo-400 border border-indigo-500/30" : "text-zinc-400 hover:bg-zinc-900 border border-transparent"}`}
                 >
                   <Theater size={20} />
                   Dramas
                 </button>
                 <button 
-                  onClick={() => { setMode("quiz"); setQuizType(null); setQuizFinished(false); setLastActiveMode("quiz"); setIsMobileMenuOpen(false); }}
+                  onClick={() => { setMode("novels"); setSelectedCategory(null); setSearch(""); setLastActiveMode("novels"); setIsMobileMenuOpen(false); setIsListView(false); }}
+                  className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl font-medium transition-all ${mode === "novels" ? "bg-indigo-600/10 text-indigo-400 border border-indigo-500/30" : "text-zinc-400 hover:bg-zinc-900 border border-transparent"}`}
+                >
+                  <BookOpen size={20} />
+                  Novels
+                </button>
+                <button 
+                  onClick={() => { setMode("prose"); setSelectedCategory(null); setSearch(""); setLastActiveMode("prose"); setIsMobileMenuOpen(false); setIsListView(false); }}
+                  className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl font-medium transition-all ${mode === "prose" ? "bg-indigo-600/10 text-indigo-400 border border-indigo-500/30" : "text-zinc-400 hover:bg-zinc-900 border border-transparent"}`}
+                >
+                  <Layout size={20} />
+                  Prose
+                </button>
+                <button 
+                  onClick={() => { setMode("quiz"); setQuizType(null); setQuizFinished(false); setLastActiveMode("quiz"); setIsMobileMenuOpen(false); setIsListView(false); }}
                   className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl font-medium transition-all ${mode === "quiz" ? "bg-indigo-600/10 text-indigo-400 border border-indigo-500/30" : "text-zinc-400 hover:bg-zinc-900 border border-transparent"}`}
                 >
                   <GraduationCap size={20} />
@@ -478,14 +513,14 @@ export default function App() {
       </AnimatePresence>
 
       <main className="max-w-7xl mx-auto p-6 md:p-10">
-        {(mode === "novels" || mode === "dramas" || mode === "prose") ? (
+        {(mode === "novels" || mode === "dramas" || mode === "prose" || mode === "poems") ? (
           <div className="space-y-10">
             <div className="flex flex-col md:flex-row gap-6 items-center justify-between">
               <div className="relative w-full md:w-96 group">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-indigo-400 transition-colors" size={18} />
                 <input 
                   type="text" 
-                  placeholder={`Search ${mode === "novels" ? "novels" : mode === "dramas" ? "dramas" : "prose"}...`}
+                  placeholder={`Search ${mode === "novels" ? "novels" : mode === "dramas" ? "dramas" : mode === "poems" ? "poems" : "prose"}...`}
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="w-full pl-12 pr-4 py-3 bg-zinc-900 border border-zinc-800 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-zinc-600 text-zinc-200"
@@ -497,7 +532,7 @@ export default function App() {
                   label="All" 
                   active={!selectedCategory} 
                   color="#e4e4e7" 
-                  onClick={() => setSelectedCategory(null)} 
+                  onClick={() => { setSelectedCategory(null); setIsListView(false); }} 
                 />
                 {categories.map(cat => (
                   <CategoryPill 
@@ -505,34 +540,98 @@ export default function App() {
                     label={cat}
                     active={selectedCategory === cat}
                     color={getCategoryColor(cat)}
-                    onClick={() => setSelectedCategory(cat)}
+                    onClick={() => { setSelectedCategory(cat); setIsListView(false); }}
                   />
                 ))}
               </div>
 
-              <button 
-                onClick={handleShuffle}
-                className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl transition-all font-bold text-sm shadow-lg shadow-indigo-500/20 active:scale-95"
-              >
-                <Shuffle size={18} />
-                Shuffle Cards
-              </button>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setIsListView(!isListView)}
+                  className={`flex items-center gap-2 px-6 py-3 rounded-2xl transition-all font-bold text-sm shadow-lg active:scale-95 ${isListView ? "bg-zinc-100 text-zinc-900 shadow-white/10" : "bg-zinc-800 text-zinc-100 border border-zinc-700 hover:bg-zinc-700"}`}
+                >
+                  {isListView ? <Layout size={18} /> : <List size={18} />}
+                  {isListView ? "Grid View" : "List View"}
+                </button>
+                <button 
+                  onClick={handleShuffle}
+                  className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl transition-all font-bold text-sm shadow-lg shadow-indigo-500/20 active:scale-95"
+                >
+                  <Shuffle size={18} />
+                  Shuffle
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-              <AnimatePresence mode="popLayout">
-                {filteredItems.map((item, idx) => (
-                  <FlashCard 
-                    key={`${item.title}-${idx}`}
-                    item={item}
-                    index={idx}
-                    isFlipped={flippedIndex === idx}
-                    onFlip={(i) => setFlippedIndex(flippedIndex === i ? null : i)}
-                    onInfo={(it) => openDetails(it)}
-                  />
-                ))}
-              </AnimatePresence>
-            </div>
+            {isListView ? (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-3xl overflow-hidden shadow-xl">
+                <div className="p-6 border-b border-zinc-800 bg-zinc-900/50 flex justify-between items-center">
+                  <h3 className="text-xl font-bold text-zinc-50 flex items-center gap-3">
+                    <List className="text-indigo-400" />
+                    All {selectedCategory || mode.charAt(0).toUpperCase() + mode.slice(1)}
+                  </h3>
+                  <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">{currentItems.filter(i => !selectedCategory || i.category === selectedCategory).length} Entries</span>
+                </div>
+                <div className="divide-y divide-zinc-800 max-h-[70vh] overflow-y-auto custom-scrollbar">
+                  {(selectedCategory 
+                    ? currentItems.filter(item => item.category === selectedCategory)
+                    : currentItems
+                  ).filter(i => !search || i.title.toLowerCase().includes(search.toLowerCase()) || i.author.toLowerCase().includes(search.toLowerCase()))
+                  .map((item, idx) => (
+                    <div key={idx} className="p-4 hover:bg-zinc-800/30 transition-colors flex items-center justify-between group">
+                      <div className="flex items-center gap-4">
+                        <div className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center text-xs font-bold text-zinc-500 group-hover:bg-indigo-500/20 group-hover:text-indigo-400 transition-colors">
+                          {idx + 1}
+                        </div>
+                        <div>
+                          <h4 className="text-zinc-100 font-bold font-serif italic">{item.title}</h4>
+                          <p className="text-zinc-500 text-xs">by {item.author} {item.year ? `· ${item.year}` : ""}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="hidden sm:inline text-[10px] font-bold px-2 py-1 rounded-md bg-zinc-800 text-zinc-500 uppercase tracking-wider">
+                          {item.category}
+                        </span>
+                        <button 
+                          onClick={() => openDetails(item)}
+                          className="p-2 bg-zinc-800 hover:bg-indigo-600 text-zinc-400 hover:text-white rounded-xl transition-all"
+                          title="View Details"
+                        >
+                          <Info size={18} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+                <AnimatePresence mode="popLayout">
+                  {filteredItems.map((item, idx) => (
+                    <FlashCard 
+                      key={`${item.title}-${idx}`}
+                      item={item}
+                      index={idx}
+                      isFlipped={flippedIndex === idx}
+                      onFlip={(i) => setFlippedIndex(flippedIndex === i ? null : i)}
+                      onInfo={(it) => openDetails(it)}
+                    />
+                  ))}
+                </AnimatePresence>
+              </div>
+            )}
+
+            {!isListView && (
+              <div className="flex justify-center pt-4">
+                <button 
+                  onClick={() => setIsListView(true)}
+                  className="group flex items-center gap-3 px-8 py-4 bg-zinc-900 border border-zinc-800 rounded-2xl text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 transition-all shadow-xl"
+                >
+                  <span className="text-sm font-bold uppercase tracking-widest">See All Entries</span>
+                  <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+                </button>
+              </div>
+            )}
             
             {filteredItems.length === 0 && (
               <div className="text-center py-32 bg-zinc-900/30 border border-dashed border-zinc-800 rounded-3xl">
@@ -577,12 +676,20 @@ export default function App() {
                   <p className="text-slate-400 text-sm">Challenge yourself with famous plays and dramatists.</p>
                 </button>
                 <button 
+                  onClick={() => startQuiz("poems")}
+                  className="group bg-slate-800/80 p-8 rounded-3xl border border-white/10 shadow-2xl backdrop-blur-md hover:bg-pink-600/20 transition-all text-center"
+                >
+                  <Feather className="mx-auto mb-4 text-pink-400 group-hover:scale-110 transition-transform" size={48} />
+                  <h3 className="text-2xl font-bold mb-2">Poetry Quiz</h3>
+                  <p className="text-slate-400 text-sm">Test your knowledge of famous poems and poets.</p>
+                </button>
+                <button 
                   onClick={() => startQuiz("all")}
                   className="group bg-slate-800/80 p-8 rounded-3xl border border-white/10 shadow-2xl backdrop-blur-md hover:bg-amber-600/20 transition-all text-center"
                 >
                   <GraduationCap className="mx-auto mb-4 text-amber-400 group-hover:scale-110 transition-transform" size={48} />
                   <h3 className="text-2xl font-bold mb-2">Combined Quiz</h3>
-                  <p className="text-slate-400 text-sm">20 questions from Novels, Dramas, and Prose.</p>
+                  <p className="text-slate-400 text-sm">20 questions from Novels, Dramas, Prose, and Poetry.</p>
                 </button>
               </motion.div>
             ) : !quizFinished ? (
@@ -662,14 +769,37 @@ export default function App() {
                         className="mt-8 p-6 bg-zinc-950/50 border border-zinc-800 rounded-2xl space-y-4"
                       >
                         <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-                          <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Literary Context</h4>
-                          {shuffledItems[quizIndex].year && (
-                            <span className="text-xs font-bold text-indigo-400 bg-indigo-400/10 px-3 py-1 rounded-full">
-                              {shuffledItems[quizIndex].year}
+                          <div className="flex flex-col">
+                            <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Literary Context</h4>
+                            <p className="text-zinc-100 font-serif italic text-lg mt-1">"{shuffledItems[quizIndex].title}"</p>
+                            <p className="text-indigo-400 text-sm font-bold">by {shuffledItems[quizIndex].author}</p>
+                          </div>
+                          <div className="flex flex-col items-end gap-2">
+                            <span className="text-[10px] font-bold text-zinc-500 bg-zinc-800 px-2 py-1 rounded">
+                              {shuffledItems[quizIndex].category}
                             </span>
-                          )}
+                            {shuffledItems[quizIndex].year && (
+                              <span className="text-xs font-bold text-indigo-400 bg-indigo-400/10 px-3 py-1 rounded-full">
+                                {shuffledItems[quizIndex].year}
+                              </span>
+                            )}
+                          </div>
                         </div>
                         
+                        {'poet' in shuffledItems[quizIndex] && (shuffledItems[quizIndex] as Poem).poet && (
+                          <div>
+                            <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-1">Poet Details</p>
+                            <p className="text-zinc-300 text-sm">{(shuffledItems[quizIndex] as Poem).poet}</p>
+                          </div>
+                        )}
+
+                        {'form' in shuffledItems[quizIndex] && (shuffledItems[quizIndex] as Poem).form && (
+                          <div>
+                            <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-1">Form</p>
+                            <p className="text-zinc-300 text-sm">{(shuffledItems[quizIndex] as Poem).form}</p>
+                          </div>
+                        )}
+
                         {shuffledItems[quizIndex].summary && (
                           <div>
                             <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-1">Summary</p>
@@ -679,8 +809,8 @@ export default function App() {
                         
                         {shuffledItems[quizIndex].facts && (
                           <div className="pt-2">
-                            <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-1">Key Fact</p>
-                            <p className="text-zinc-400 text-sm leading-relaxed">{shuffledItems[quizIndex].facts}</p>
+                            <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-1">Key Facts</p>
+                            <p className="text-zinc-400 text-sm leading-relaxed whitespace-pre-line">{shuffledItems[quizIndex].facts}</p>
                           </div>
                         )}
                       </motion.div>
@@ -788,6 +918,19 @@ export default function App() {
         .transform-style-3d { transform-style: preserve-3d; }
         .backface-hidden { backface-visibility: hidden; }
         .rotate-y-180 { transform: rotateY(180deg); }
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #27272a;
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #3f3f46;
+        }
       `}</style>
     </div>
   );
